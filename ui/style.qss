@@ -1,0 +1,33 @@
+QWidget { background: #fcfbff; color: #29263c; font-family: 'Microsoft YaHei UI'; font-size: 14px; }
+QLabel { background: transparent; }
+QLabel#title { font-size: 25px; font-weight: 600; }
+QLabel#brand { font-size: 19px; font-weight: 600; color: #6550b8; }
+QLabel#muted { color: #79748c; font-size: 12px; }
+QFrame#card { background: #f1edfc; border: 1px solid #e4ddf5; border-radius: 12px; }
+QPushButton { background: #fff; border: 1px solid #ddd6ee; border-radius: 9px; padding: 10px 12px; }
+QPushButton:hover { background: #f0ebfc; border-color: #ac98e9; }
+QPushButton#primary { background: #8064d5; color: white; border: none; }
+QPushButton#primary:hover { background: #7155c6; }
+QListWidget { border: none; background: #f5f2fb; outline: none; border-radius: 12px; padding: 6px; }
+QListWidget::item { padding: 15px 8px; margin: 3px 0; border-radius: 8px; }
+QListWidget::item:selected { background: #e4dbfa; color: #4e388d; }
+QTextBrowser, QPlainTextEdit, QLineEdit { background: white; border: 1px solid #e2dced; border-radius: 10px; padding: 12px; selection-background-color: #d8c9fa; }
+QPlainTextEdit { font-family: Consolas, 'Microsoft YaHei UI'; font-size: 16px; }
+QSplitter::handle { background: #eee9f6; width: 2px; }
+QStatusBar { color: #79748c; border-top: 1px solid #e9e3f2; }
+QComboBox { background: white; border: 1px solid #ddd6ee; border-radius: 7px; padding: 9px; }
+QPushButton:disabled { background: #efedf3; color: #9993a5; border-color: #e4e0eb; }
+QPushButton#primary:disabled { background: #e9e3f5; color: #9993a5; }
+QLineEdit:disabled { background: #f2f0f5; color: #827b90; }
+QCheckBox { padding: 5px 0; }
+QScrollArea#chatView { border: 1px solid #e9e2f3; border-radius: 12px; background: #faf8fe; }
+QWidget#chatCanvas, QWidget#chatRow { background: #faf8fe; }
+QFrame#assistantBubble { background: #f0eafa; border: 1px solid #e3d8f4; border-radius: 16px; }
+QFrame#userBubble { background: #eaf0fc; border: 1px solid #dbe4f6; border-radius: 16px; }
+QTextBrowser#messageText { background: transparent; border: none; padding: 0; font-family: 'Microsoft YaHei UI'; font-size: 15px; }
+QLabel#chatBadge { background: #ded0f6; color: #6944a5; border-radius: 13px; font-weight: 600; }
+QLabel#chatName { color: #604393; font-size: 14px; font-weight: 600; }
+QLabel#chatMeta { color: #8b7f9c; font-size: 11px; }
+QLabel#chatError { color: #9c4354; font-size: 13px; }
+QPushButton#chatAction { background: transparent; border: none; padding: 3px 6px; color: #867797; font-size: 11px; }
+QPushButton#chatAction:hover { background: #e3d9f3; color: #63428f; }
