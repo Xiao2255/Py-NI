@@ -11,7 +11,7 @@ import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '0.1.0'
+VERSION = '0.3.0'
 SOURCE_FILES = ['main.py', 'config.py', 'README.md', 'requirements.txt', 'requirements-dev.txt',
                 'start.bat', 'PyNi.spec', '.gitignore', 'CHANGELOG.md']
 SOURCE_DIRS = ['ui', 'services', 'tools', 'tests', 'scripts', 'prompts', 'assets', 'docs', '.github', 'licenses']
@@ -72,7 +72,7 @@ def main():
         with file.open('rb') as stream:
             lines.append(f'{hashlib.file_digest(stream, "sha256").hexdigest()}  {file.name}')
     checksums = '\n'.join(lines) + '\n'
-    (release / 'SHA256SUMS.txt').write_text(checksums, encoding='utf-8')
+    (release / f'PyNi-{VERSION}-SHA256SUMS.txt').write_text(checksums, encoding='utf-8')
     print('Release ready:', binary, source, sep='\n')
 
 

@@ -166,6 +166,63 @@ def check_loops_exercise(code):
     return True, "循环次数和缩进里的输出都符合任务啦。这里没有运行程序；做个小判断，看看循环里的 i 怎样变化，以及循环外的语句会执行几次。"
 
 
+# 每一步对应题目指定的一条语句和一条反馈。比较语法树会忽略引号风格、空行和注释。
+LIST_STEPS = (
+    ('tasks = ["阅读", "练习"]', '先用方括号创建 tasks，按顺序放入两项文字“阅读”和“练习”，中间用英文逗号隔开。'),
+    ('tasks.append("复习")', '在原来的清单末尾追加一项，用 tasks.append("复习")。append 会直接修改 tasks。'),
+    ('print(tasks[1])', '先输出第二项。第一项的索引是 0，第二项的索引是 1；把 tasks[1] 放进 print。'),
+    ('print(tasks[2])', '最后按索引读出追加的那一项。现在共有三项，最后一项的索引是多少？'),
+)
+DICTIONARY_STEPS = (
+    ('scores = {"小林": 3}', '先创建字典 scores，用花括号保存一对键和值：名字“小林”和整数 3，中间用英文冒号隔开。'),
+    ('scores["小林"] = 5', '用已有的键“小林”取到对应位置，再把整数 5 赋给它。这一步只改小林的积分。'),
+    ('scores["小雨"] = 2', '用同一个字典，给新键“小雨”赋值 2。前面的小林要留在字典里。'),
+    ('print(scores["小林"])', '先按名字查询小林的积分：把 scores["小林"] 放进 print，读取更新后的值。'),
+    ('print(scores["小雨"])', '最后按名字查询小雨的积分：方括号里的键要和添加时的名字一致。'),
+)
+FUNCTION_STEPS = (
+    ('def add_point(score):\n    return score + 1',
+     '按任务定义 def add_point(score):，然后在缩进的一行写 return score + 1，把结果交回调用处。'),
+    ('print(add_point(4))', '回到没有缩进的位置，把 4 传给 add_point，再用 print 显示返回值。'),
+    ('print(add_point(9))', '再调用一次同一个函数，这次传入 9。把这次调用的结果交给 print 显示。'),
+)
+
+
+def _check_steps(code, steps, success):
+    tree = _parse_exercise(code)
+    if isinstance(tree, str):
+        return False, tree
+    for index, (example, feedback) in enumerate(steps):
+        if index >= len(tree.body):
+            return False, feedback
+        try:
+            actual = ast.dump(tree.body[index])
+        except RecursionError:
+            return False, "表达式嵌套得有点深。先用本课示例里的简单写法完成这一小步吧。"
+        if actual != ast.dump(ast.parse(example).body[0]):
+            return False, feedback
+    if len(tree.body) > len(steps):
+        return False, "规定的步骤已经写好啦。最后一次输出之后还有其他语句，把它们移开后再检查吧。"
+    return True, success
+
+
+def check_lists_exercise(code):
+    return _check_steps(code, LIST_STEPS, "清单的顺序、追加操作和两次索引读取都写对了。来试试预测另一份清单的输出吧。")
+
+
+def check_dictionaries_exercise(code):
+    return _check_steps(code, DICTIONARY_STEPS, "你用同一个字典更新了小林的积分，也给小雨加了记录。接下来换一组键，看看每次查询能得到什么。")
+
+
+def check_functions_exercise(code):
+    return _check_steps(code, FUNCTION_STEPS, "加分规则写在函数里，两次调用各自传入了分数。来看看换一个函数之后，返回值会怎样变化。")
+
+
+def _example_hint(steps):
+    source = "\n".join(line for line, _ in steps)
+    return f"可以对照这个写法，再试着自己解释每一步：\n\n```python\n{source}\n```"
+
+
 CHECKPOINTS = {
     "print": {
         "checker": check_print_exercise,
@@ -246,7 +303,58 @@ CHECKPOINTS = {
         "quiz_feedback": "range(3) 从 0 开始，依次给出 0、1、2。最后一条 print 没有缩进，位于循环外，会在循环结束后执行一次。",
         "exercise_evidence": "range(5) 循环与内部输出符合任务；未执行，理解小测尚未完成。",
         "completion_evidence": "循环练习符合任务；能预测 range 的起点、结束位置以及循环内外输出次数。未执行代码，不能据此断言全面掌握。",
-        "recap": "今天练习了重复次数、循环变量和缩进。五节入门课已经走到这里啦！可以打开学习记录，挑一节还不熟的重新练习，再准备把这些知识用到一个小程序中。",
+        "recap": "今天练习了重复次数、循环变量和缩进。下一课我们把几项任务装进一个列表，按位置找出想做的那一项。",
+    },
+    "lists": {
+        "checker": check_lists_exercise,
+        "hints": (
+            "想象给任务清单的每一项贴号码：第一张标签写 0，后面两个该写几？",
+            '先把“阅读”和“练习”放进 tasks，再用 tasks.append("复习")。最后用 tasks[索引] 分别读第二项和第三项。',
+            _example_hint(LIST_STEPS),
+        ),
+        "quiz_code": 'books = ["海洋", "星空"]\nbooks.append("森林")\nprint(books[2])\nprint(books[0])',
+        "quiz_question": "为什么两条输出会按这个顺序出现？",
+        "quiz_options": ("append 总是把新书放到最前面", "新书在索引 2，索引 0 仍然对应第一本书", "索引 0 和索引 2 都是最后一本书"),
+        "quiz_output": ("森林", "海洋"),
+        "quiz_reason": "新书在索引 2，索引 0 仍然对应第一本书",
+        "quiz_feedback": "先把三本书按加入的顺序写下来，再从 0 标索引。两条 print 先读索引 2，再读索引 0。",
+        "exercise_evidence": "列表创建、append 和两次索引读取符合任务；已检查语法树，待完成理解小测。",
+        "completion_evidence": "完成列表练习，正确预测追加元素后两个索引处的值，并解释索引与位置的关系。",
+        "recap": "今天用索引读出了列表里的任务，还给清单追加了新任务。下一课我们改用名字来查积分，看看字典是怎么工作的。",
+    },
+    "dictionaries": {
+        "checker": check_dictionaries_exercise,
+        "hints": (
+            "把同学的名字当成标签，分数就是标签下的值。改分时要找到原来的标签，添加同学时则需要一个新标签。",
+            '建立 scores 之后，依次给 scores["小林"] 和 scores["小雨"] 赋值。两条 print 也用同样的键读取分数。',
+            _example_hint(DICTIONARY_STEPS),
+        ),
+        "quiz_code": 'counts = {"拼图": 4}\ncounts["拼图"] = 6\ncounts["绘画"] = 2\nprint(counts["绘画"])\nprint(counts["拼图"])',
+        "quiz_question": "为什么读取“拼图”时得到的是更新后的数量？",
+        "quiz_options": ("同一个键保存所有赋过的值", "加入“绘画”后两个键的值都变成 2", "给已有的键赋值会替换这个键的值"),
+        "quiz_output": ("2", "6"),
+        "quiz_reason": "给已有的键赋值会替换这个键的值",
+        "quiz_feedback": "给“拼图”第二次赋值后，划掉旧数量并写上新数量。再看两条 print 各自查询的是哪个键。",
+        "exercise_evidence": "字典创建、按键更新、新增记录和两次查询符合任务；已检查语法树，待完成理解小测。",
+        "completion_evidence": "完成字典记分练习，正确预测已有键更新和新键添加后的查询结果。",
+        "recap": "你已经可以按名字记录和查询积分了。下一课把“分数加一”的规则写成函数，让同一段代码能处理不同的分数。",
+    },
+    "functions": {
+        "checker": check_functions_exercise,
+        "hints": (
+            "先把函数想成一道填空题：传进来的分数叫 score，填好它，算出多一分的结果，然后还给调用者。",
+            "def 一行写函数名和参数 score，下一行缩进写 return。两条 print 放在函数体外，分别给 add_point 传入 4 和 9。",
+            _example_hint(FUNCTION_STEPS),
+        ),
+        "quiz_code": 'def minutes(hours):\n    return hours * 60\n\nprint(minutes(2))\nprint(minutes(1))',
+        "quiz_question": "同一个函数为什么能给出两个不同的结果？",
+        "quiz_options": ("每次调用都使用第一次传入的数字", "每次调用把这次传入的数交给 hours，再返回计算结果", "定义函数时就会显示两个结果"),
+        "quiz_output": ("120", "60"),
+        "quiz_reason": "每次调用把这次传入的数交给 hours，再返回计算结果",
+        "quiz_feedback": "第一次把 2 代入 hours * 60，第二次把 1 代进去。两次计算各自返回给外面的 print。",
+        "exercise_evidence": "单参数函数、return 和两次带参调用符合任务；已检查语法树，待完成理解小测。",
+        "completion_evidence": "完成加分函数练习，正确预测两次调用的返回值，并解释实参如何参与计算。",
+        "recap": "这次你把一条加分规则写成了可重复调用的函数。打开学习记录，挑一节想巩固的课，换道复习题试试。",
     },
 }
 

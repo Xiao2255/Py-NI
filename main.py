@@ -18,7 +18,7 @@ def main():
     trace('QApplication created')
     app.setOrganizationName("PyNi")
     app.setApplicationName("PyNi")
-    app.setApplicationVersion("0.1.0")
+    app.setApplicationVersion("0.3.0")
     app.setStyle("Fusion")
     app.setWindowIcon(QIcon(str(Path(__file__).resolve().parent / "assets/companion.png")))
     smoke = "--smoke-test" in sys.argv

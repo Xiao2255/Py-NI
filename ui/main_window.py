@@ -2,6 +2,7 @@
 from pathlib import Path
 import sqlite3
 import json
+from datetime import datetime, timezone
 from copy import deepcopy
 from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QIcon, QPixmap
@@ -18,8 +19,10 @@ from services.agent import AgentClient
 from tools.project_tools import ProjectTools, STUDY_TOOLS, PROJECT_TOOLS
 from .editor import CodeEditor, QuestionEdit
 from services.learning import new_progress, CHECKPOINTS
-from services.study_store import StudyStore
+from services.study_store import BACKUP_VERSION, StudyStore
 from .learning_dialogs import UnderstandingDialog, RecordsDialog
+from .review_dialog import ReviewDialog
+from services.review import recommend
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -127,6 +130,8 @@ class MainWindow(QMainWindow):
             self.lesson_list.addItem(f"{number:02d}  {lesson['name']}")
         side.addWidget(self.lesson_list, 1)
         side.addWidget(button("学习记录", self.show_records))
+        self.review_button = button("复习当前课", self.show_review)
+        side.addWidget(self.review_button)
         self.folder_button = button("授权代码文件夹", self.select_project)
         side.addWidget(self.folder_button)
         self.folder_status = label("尚未授权文件夹", "muted")
@@ -153,6 +158,10 @@ class MainWindow(QMainWindow):
         self.progress_label = label("", "muted")
         card_layout.addWidget(self.progress_label)
         middle.addWidget(card)
+        self.recommendation = label('', 'muted')
+        middle.addWidget(self.recommendation)
+        self.recommend_button = button('按建议继续', self.follow_recommendation)
+        middle.addWidget(self.recommend_button)
         self.conversation = ChatView()
         middle.addWidget(self.conversation, 1)
         entry = QHBoxLayout()
@@ -270,6 +279,9 @@ class MainWindow(QMainWindow):
         self.save_timer.start(600)
 
     def update_progress_ui(self):
+        index, action, reason = recommend(self.progress)
+        self.recommendation.setText(f'下一步建议：{LESSONS[index]["name"]} · {reason}')
+        self.recommend_button.setEnabled(not self.client.busy)
         record = self.progress[self.current_lesson]
         supported = LESSONS[self.current_lesson]["id"] in CHECKPOINTS
         checked = record["checked_code"] is not None and record["checked_code"] == self.editor.toPlainText()
@@ -414,6 +426,7 @@ class MainWindow(QMainWindow):
         system += f'\n当前课程：{lesson["name"]}\n学习目标：{lesson["goal"]}\n练习任务：{lesson["task"]}'
         record = self.progress[self.current_lesson]
         system += f'\n学习状态（记录并非全面掌握证明）：{record["status"]}\n记录依据：{record["evidence"]}\n已使用本地提示次数：{record["hints"]}'
+        system += f'\n最近独立复习记录：{record.get("review", {}).get("result", "尚未复习")}（不替代课程成绩）'
         messages = [{"role": "system", "content": system}]
         previous = [turn for turn in self.chats[self.current_lesson] if turn.get("status") == "success"][-6:]
         budget = 40_000
@@ -446,7 +459,7 @@ class MainWindow(QMainWindow):
         self.bubble.setText("我正在看你的问题…")
 
     def set_busy(self, busy):
-        for widget in (self.send_button, self.check_button, self.lesson_list, self.settings_button, self.folder_button, self.help_button, self.restore_button):
+        for widget in (self.send_button, self.check_button, self.lesson_list, self.settings_button, self.folder_button, self.help_button, self.restore_button, self.review_button):
             widget.setEnabled(not busy)
         self.cancel_button.setEnabled(busy)
         self.retry_button.setEnabled(not busy and self.retry_data is not None and self.retry_data[0] == self.current_lesson)
@@ -500,6 +513,37 @@ class MainWindow(QMainWindow):
             self.persist_changes()
         dialog.deleteLater()
 
+    def follow_recommendation(self):
+        if self.client.busy:
+            return
+        index, action, _ = recommend(self.progress)
+        if self.current_lesson != index or self.help_mode:
+            if self.current_lesson == index:
+                self.select_lesson(index)
+            else:
+                self.lesson_list.setCurrentRow(index)
+        if action == 'review':
+            self.show_review()
+        else:
+            self.request_status.setText('已回到推荐课程，右侧保留你的草稿。')
+
+    def show_review(self):
+        if self.client.busy:
+            return
+        index = self.current_lesson
+        dialog = ReviewDialog(LESSONS[index]['id'], self)
+        dialog.exec()
+        if dialog.attempts:
+            result = ('独立答对' if dialog.attempts == 1 else '提示后答对') if dialog.passed else '需要再练'
+            self.progress[index]['review'] = {'result': result, 'attempts': dialog.attempts,
+                'updated': datetime.now(timezone.utc).isoformat(timespec='seconds')}
+            self.chats[index].append({'local': True, 'label': '复习小结',
+                'reply': f'本次“{LESSONS[index]["name"]}”复习：{result}。原课程成绩和代码草稿保持不变。\n\n' + dialog.question[5]})
+            self.render_conversation()
+            self.on_edit(mark_practice=False)
+            self.persist_changes()
+        dialog.deleteLater()
+
     def select_project(self):
         directory = QFileDialog.getExistingDirectory(self, "选择希望 Py妮阅读的代码文件夹")
         if not directory:
@@ -536,9 +580,11 @@ class MainWindow(QMainWindow):
         if name == "list_project_files":
             return self.project_tools.list_files()
         if name == "get_learning_progress":
+            suggested, action, reason = recommend(self.progress)
             return {"lessons": [{"lesson": lesson["name"], "status": self.progress[i]["status"],
-                    "evidence": self.progress[i]["evidence"]} for i, lesson in enumerate(LESSONS)],
-                    "current": LESSONS[index]["name"], "next_step": "检查练习通过后，完成理解小测。"}
+                    "evidence": self.progress[i]["evidence"], "review": self.progress[i].get('review')}
+                    for i, lesson in enumerate(LESSONS)], "current": LESSONS[index]["name"],
+                    "next_step": {'lesson': LESSONS[suggested]['name'], 'action': action, 'reason': reason}}
         if name == "check_current_exercise":
             passed, feedback = CHECKPOINTS[LESSONS[index]["id"]]["checker"](code)
             return {"passed_static_check": passed, "feedback": feedback, "executed": False,
@@ -556,7 +602,7 @@ class MainWindow(QMainWindow):
         destination, _ = QFileDialog.getSaveFileName(self, "备份学习记录（包含对话和代码，请妥善保管）", "PyNi-study.json", "JSON (*.json)")
         if not destination:
             return
-        data = {"format": "pyni-study", "version": 1, "current": LESSONS[self.current_lesson]["id"],
+        data = {"format": "pyni-study", "version": BACKUP_VERSION, "current": LESSONS[self.current_lesson]["id"],
                 "lessons": {lesson["id"]: {"draft": self.drafts.get(i, lesson["code"]),
                     "question": self.questions.get(i, ""), "progress": self.progress[i], "chats": self.chats[i]}
                     for i, lesson in enumerate(LESSONS)}}
@@ -584,27 +630,32 @@ class MainWindow(QMainWindow):
         except (OSError, ValueError, RecursionError):
             QMessageBox.warning(self, "无法恢复", "备份格式不正确或文件过大，现有记录未更改。")
             return
-        if QMessageBox.question(self, "恢复学习记录", "这会替换当前五节课的草稿、对话和进度。需要保留当前内容时，请先备份。确定恢复吗？") != QMessageBox.StandardButton.Yes:
+        count = len(data["lessons"])
+        message = f"将用备份替换其中 {count} 节课的草稿、对话和进度。"
+        if count < len(LESSONS):
+            message += "新增章节的学习记录会保留。"
+        if QMessageBox.question(self, "恢复学习记录", message + "确定恢复吗？") != QMessageBox.StandardButton.Yes:
             return
-        self.save_timer.stop()
         try:
-            self.store.restore(data, {lesson["id"]: self.revisions[i] for i, lesson in enumerate(LESSONS)})
-            loaded, selected = self.store.load([lesson["id"] for lesson in LESSONS])
+            updated = self.store.restore(data, {lesson["id"]: self.revisions[i] for i, lesson in enumerate(LESSONS)})
         except (OSError, sqlite3.Error, ValueError):
             QMessageBox.warning(self, "恢复失败", "未能恢复，请检查文件权限或其他窗口的修改。")
             return
         self.current_lesson = None
-        self.dirty.clear()
         for i, lesson in enumerate(LESSONS):
-            row, revision, updated = loaded[lesson["id"]]
+            if lesson["id"] not in data["lessons"]:
+                continue
+            self.dirty.discard(i)
+            row = data["lessons"][lesson["id"]]
             self.drafts[i], self.questions[i] = row["draft"], row["question"]
             self.progress[i], self.chats[i] = row["progress"], row["chats"]
             for turn in self.chats[i]:
                 if turn.get("status") == "pending":
                     turn.update(status="failed", error="备份中的请求未完成，请重新发送。")
-            self.revisions[i], self.timestamps[i] = revision, updated
+            self.revisions[i] += 1
+            self.timestamps[i] = updated
         self.retry_data = None
-        index = next(i for i, lesson in enumerate(LESSONS) if lesson["id"] == selected)
+        index = next(i for i, lesson in enumerate(LESSONS) if lesson["id"] == data["current"])
         self.lesson_list.blockSignals(True)
         self.lesson_list.setCurrentRow(index)
         self.lesson_list.blockSignals(False)

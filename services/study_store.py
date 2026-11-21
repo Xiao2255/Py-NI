@@ -9,6 +9,10 @@ from PySide6.QtCore import QStandardPaths
 from .learning import STATUSES
 
 
+BACKUP_VERSION = 2
+LEGACY_LESSON_IDS = frozenset(("print", "variables", "types", "conditions", "loops"))
+
+
 class StudyConflictError(OSError):
     pass
 
@@ -63,6 +67,12 @@ class StudyStore:
             raise ValueError("练习检查记录格式异常，原文件已保留。")
         if not all(isinstance(progress.get(key), str) for key in ("evidence", "source", "note")):
             raise ValueError("学习记录格式异常，原文件已保留。")
+        if 'review' in progress:
+            review = progress['review']
+            if (not isinstance(review, dict) or review.get('result') not in ('独立答对', '提示后答对', '需要再练')
+                    or type(review.get('attempts')) is not int or review['attempts'] < 1
+                    or not isinstance(review.get('updated'), str)):
+                raise ValueError('复习记录格式异常，原文件已保留。')
         if not isinstance(data.get("chats"), list):
             raise ValueError("对话记录格式异常，原文件已保留。")
         for turn in data["chats"]:
@@ -81,9 +91,14 @@ class StudyStore:
 
     @classmethod
     def validate_backup(cls, data, lesson_ids):
-        if not isinstance(data, dict) or data.get("format") != "pyni-study" or data.get("version") != 1:
+        if (not isinstance(data, dict) or data.get("format") != "pyni-study"
+                or type(data.get("version")) is not int or data["version"] not in (1, BACKUP_VERSION)):
             raise ValueError("未知备份格式。")
-        if not isinstance(data.get("lessons"), dict) or set(data["lessons"]) != set(lesson_ids) or data.get("current") not in lesson_ids:
+        expected = set(lesson_ids)
+        if data["version"] == 1 and LEGACY_LESSON_IDS <= expected:
+            expected = LEGACY_LESSON_IDS
+        if (not isinstance(data.get("lessons"), dict) or set(data["lessons"]) != expected
+                or not isinstance(data.get("current"), str) or data["current"] not in expected):
             raise ValueError("备份课程不匹配。")
         for row in data["lessons"].values():
             cls.validate(row)
@@ -93,14 +108,15 @@ class StudyStore:
         updated = datetime.now(timezone.utc).isoformat(timespec="seconds")
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            for key, revision in revisions.items():
+            for key in data["lessons"]:
                 row = db.execute("SELECT revision FROM lessons WHERE id=?", (key,)).fetchone()
-                if (row[0] if row else 0) != revision:
+                if (row[0] if row else 0) != revisions[key]:
                     raise StudyConflictError("其他窗口已更新记录，恢复已取消。")
             for key, payload in data["lessons"].items():
                 db.execute("INSERT INTO lessons VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,revision=excluded.revision,updated=excluded.updated",
                            (key, json.dumps(payload, ensure_ascii=False), revisions[key] + 1, updated))
             db.execute("INSERT INTO settings VALUES ('current_lesson',?) ON CONFLICT(name) DO UPDATE SET value=excluded.value", (data["current"],))
+        return updated
 
     def save(self, lesson_id, data, revision, current=True):
         self.validate(data)

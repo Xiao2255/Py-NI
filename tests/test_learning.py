@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import unittest
@@ -6,12 +7,13 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QMessageBox
 from services.learning import (check_print_exercise, check_variables_exercise, check_understanding, new_progress,
                               check_types_exercise, check_conditions_exercise, check_loops_exercise)
-from services.study_store import StudyStore, StudyConflictError
+from services.study_store import BACKUP_VERSION, StudyStore, StudyConflictError
 from ui.main_window import MainWindow
 from ui.learning_dialogs import UnderstandingDialog
+from ui.lessons import LESSONS
 
 APP = QApplication.instance() or QApplication([])
 GOOD_CODE = 'print("小明")\nprint("我开始学 Python 了")'
@@ -316,20 +318,86 @@ class PersistenceTests(unittest.TestCase):
                     window.check_code()
                     request.assert_called_once()
                 window.show_help()
-        self.assertEqual(window.next_button.text(), '回顾学习记录')
-        with patch.object(window, 'show_records') as records:
-            window.next_lesson()
-            records.assert_called_once()
+        self.assertEqual(window.next_button.text(), '下一课 →')
+        window.next_lesson()
+        self.assertEqual(LESSONS[window.current_lesson]['id'], 'lists')
         window.persist_changes()
         restored = MainWindow(store=StudyStore(self.path))
-        self.assertEqual(restored.current_lesson, 4)
+        self.assertEqual(LESSONS[restored.current_lesson]['id'], 'lists')
         for index, _, code, _, _ in cases:
             self.assertEqual(restored.drafts[index], code)
             self.assertEqual(restored.progress[index]['status'], '提示下完成' if index == 3 else '独立完成')
         self.assertEqual(restored.progress[1]['status'], '尚未开始')
+        restored.lesson_list.setCurrentRow(len(LESSONS) - 1)
+        self.assertEqual(restored.next_button.text(), '回顾学习记录')
+        with patch.object(restored, 'show_records') as records:
+            restored.next_lesson()
+            records.assert_called_once()
         for item in (window, restored):
             item.save_timer.stop()
             item.deleteLater()
+
+    def test_old_backup_preserves_new_course_and_roundtrips_all_eight(self):
+        old_ids = ('print', 'variables', 'types', 'conditions', 'loops')
+        row = {'draft': GOOD_CODE, 'question': '旧问题', 'chats': [], 'progress': new_progress()}
+        old = {'format': 'pyni-study', 'version': 1, 'current': 'loops',
+               'lessons': {lesson_id: row for lesson_id in old_ids}}
+        backup = Path(self.temp.name) / 'backup.json'
+        backup.write_text(json.dumps(old), encoding='utf-8')
+        self.store.save('loops', dict(row, draft='上次启动时的草稿'), 0)
+        window = MainWindow(store=self.store)
+        self.addCleanup(window.deleteLater)
+        self.addCleanup(window.save_timer.stop)
+        self.assertEqual(window.current_lesson, 4)
+        self.assertEqual(window.editor.toPlainText(), '上次启动时的草稿')
+        self.assertEqual(window.progress[5]['status'], '尚未开始')
+        window.next_lesson()
+        window.editor.setPlainText('items = ["自己的草稿"]')
+        window.question.setText('还在想的问题')
+        with patch.object(QFileDialog, 'getOpenFileName', return_value=(str(backup), '')), \
+                patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes):
+            window.import_records()
+        self.assertEqual(window.current_lesson, 4)
+        self.assertEqual(window.editor.toPlainText(), GOOD_CODE)
+        self.assertTrue(window.persist_changes())
+        restored, selected = self.store.load([lesson['id'] for lesson in LESSONS])
+        self.assertEqual(selected, 'loops')
+        self.assertEqual(restored['lists'][0]['draft'], 'items = ["自己的草稿"]')
+        self.assertEqual(restored['lists'][0]['question'], '还在想的问题')
+        self.assertEqual(restored['lists'][0]['progress']['status'], '正在练习')
+        self.assertEqual(window.progress[6]['status'], '尚未开始')
+        self.assertEqual(window.progress[7]['status'], '尚未开始')
+
+        with patch.object(QFileDialog, 'getSaveFileName', return_value=(str(backup), '')):
+            window.export_records()
+        exported = json.loads(backup.read_text(encoding='utf-8'))
+        ids = [lesson['id'] for lesson in LESSONS]
+        self.assertEqual(exported['version'], BACKUP_VERSION)
+        self.assertEqual(set(exported['lessons']), set(ids))
+        other = StudyStore(Path(self.temp.name) / 'restored.sqlite3')
+        other.restore(exported, dict.fromkeys(ids, 0))
+        loaded, selected = other.load(ids)
+        self.assertEqual(selected, 'loops')
+        self.assertEqual({key: value[0] for key, value in loaded.items()}, exported['lessons'])
+
+    def test_truncated_or_mismatched_backups_do_not_replace_rows(self):
+        old_ids = ['print', 'variables', 'types', 'conditions', 'loops']
+        all_ids = [lesson['id'] for lesson in LESSONS]
+        row = {'draft': GOOD_CODE, 'question': '', 'chats': [], 'progress': new_progress()}
+        self.store.save('print', row, 0)
+        revisions = dict.fromkeys(all_ids, 0)
+        revisions['print'] = 1
+        for version, keys, current in (
+                (1, old_ids[:-1], 'print'), (1, old_ids, 'lists'),
+                (BACKUP_VERSION, old_ids, 'print'), (BACKUP_VERSION, all_ids + ['unknown'], 'loops')):
+            data = {'format': 'pyni-study', 'version': version, 'current': current,
+                    'lessons': {key: dict(row, draft='替换') for key in keys}}
+            with self.subTest(version=version, keys=keys, current=current):
+                with self.assertRaises(ValueError):
+                    self.store.restore(data, revisions)
+                loaded, selected = self.store.load(all_ids)
+                self.assertEqual(loaded['print'][0], row)
+                self.assertEqual(selected, 'print')
 
 
 if __name__ == "__main__":
